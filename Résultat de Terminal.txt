@@ -1,0 +1,49 @@
+Last login: Thu Dec 11 13:08:37 on ttys000
+
+The default interactive shell is now zsh.
+To update your account to use zsh, please run `chsh -s /bin/zsh`.
+For more details, please visit https://support.apple.com/kb/HT208050.
+MacBookAir:~ abdallah$ cd /Users/abdallah/Desktop/discord-bot-rdv
+MacBookAir:discord-bot-rdv abdallah$ node index.js
+node:internal/modules/cjs/loader:1424
+  throw err;
+  ^
+
+Error: Cannot find module 'googleapis'
+Require stack:
+- /Users/abdallah/Desktop/discord-bot-rdv/index.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1421:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1059:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1064:22)
+    at Module._load (node:internal/modules/cjs/loader:1227:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+    at Module.require (node:internal/modules/cjs/loader:1504:12)
+    at require (node:internal/modules/helpers:152:16)
+    at Object.<anonymous> (/Users/abdallah/Desktop/discord-bot-rdv/index.js:13:20)
+    at Module._compile (node:internal/modules/cjs/loader:1761:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ '/Users/abdallah/Desktop/discord-bot-rdv/index.js' ]
+}
+
+Node.js v24.12.0
+MacBookAir:discord-bot-rdv abdallah$ cd /Users/abdallah/Desktop/discord-bot-rdv
+MacBookAir:discord-bot-rdv abdallah$ npm install googleapis
+
+added 82 packages, and audited 114 packages in 44s
+
+37 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+MacBookAir:discord-bot-rdv abdallah$ node index.js
+✅ Connecté en tant que Bot Rdv Vroom#2468
+(node:4752) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+❌ Erreur interaction: [Error: ENOENT: no such file or directory, open '/Users/abdallah/Desktop/discord-bot-rdv/credentials.json'] {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/abdallah/Desktop/discord-bot-rdv/credentials.json'
+}
+
