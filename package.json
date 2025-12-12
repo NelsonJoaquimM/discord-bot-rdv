@@ -17,6 +17,7 @@
   "type": "commonjs",
   "dependencies": {
     "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3",
     "googleapis": "^168.0.0",
     "node-fetch": "^3.3.2"
   }
