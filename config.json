@@ -1,0 +1,13 @@
+{
+  "build": {
+    "builder": "NIXPACKS",
+    "nixpacksConfig": {
+      "languages": {
+        "nodejs": {
+          "version": "20"
+        }
+      }
+    }
+  }
+}
+
