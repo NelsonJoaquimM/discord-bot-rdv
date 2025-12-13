@@ -18,7 +18,7 @@ const { google } = require("googleapis");
 
 // --- Authentification Google ---
 const auth = new google.auth.GoogleAuth({
-  keyFile: "credentials.json",
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
@@ -28,37 +28,35 @@ async function saveToSheet(all) {
     const sheets = google.sheets({ version: "v4", auth: await auth.getClient() });
     const spreadsheetId = "1VFTJUZzoSp4xNXxourEtAmaY9eHKmwK90RiUs6KfsZI";
 
-    // 🔍 Lire la colonne A pour trouver la dernière ligne réellement remplie
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: "Feuille1!A2:A3238", // adapte à la taille réelle de ta feuille
+      range: "Feuille1!A2:A3238",
     });
     const values = res.data.values || [];
 
     let lastRow = 1;
     for (let i = 0; i < values.length; i++) {
       if (values[i][0] && values[i][0].toString().trim() !== "") {
-        lastRow = i + 2; // +2 car on commence à A2
+        lastRow = i + 2;
       }
     }
     const nextRow = lastRow + 1;
 
-    // ✍️ Écrire exactement à la suite
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `Feuille1!A${nextRow}:I${nextRow}`,
       valueInputOption: "RAW",
       requestBody: {
         values: [[
-          new Date().toLocaleString("fr-FR"), // Horodateur (A)
-          all.agent,                          // Agent (B)
-          all.garage,                         // Garage (C)
-          all.client,                         // Client (D)
-          all.voiture,                        // Voiture (E)
-          all.tel,                            // Tel (F)
-          all.date,                           // Date du RDV (G)
-          all.heure,                          // Heure du RDV (H)
-          all.rebooking || "-"                // Rdv Rebooké ? (I)
+          new Date().toLocaleString("fr-FR"),
+          all.agent,
+          all.garage,
+          all.client,
+          all.voiture,
+          all.tel,
+          all.date,
+          all.heure,
+          all.rebooking || "-"
         ]],
       },
     });
@@ -165,7 +163,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const all = { ...data1, ...data2 };
       pendingData.delete(interaction.user.id);
 
-      // ✅ Répondre immédiatement à Discord
       await interaction.reply({
         content:
           `📋 RDV enregistré:\n` +
@@ -175,7 +172,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ephemeral: true,
       });
 
-      // ⚡ Écriture vers Google Sheets en arrière-plan
       saveToSheet(all).catch(err => {
         console.error("❌ Erreur Google Sheets:", err.message);
       });
@@ -189,7 +185,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// ✅ Connexion avec le token depuis .env
-client.login(process.env.DISCORD_TOKEN);
+// --- Vérification du token avant connexion ---
+if (!process.env.DISCORD_TOKEN) {
+  console.error("❌ Aucun token reçu depuis Railway !");
+} else {
+  console.log("🔑 Token reçu: OK (masqué)");
+  
+console.log("DISCORD_TOKEN =", process.env.DISCORD_TOKEN ? "✅ présent" : "❌ absent");
 
+client.login(process.env.DISCORD_TOKEN);
+}
 
