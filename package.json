@@ -19,5 +19,8 @@
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
     "googleapis": "^105.0.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
