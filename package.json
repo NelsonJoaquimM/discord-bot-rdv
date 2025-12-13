@@ -1,4 +1,4 @@
- {
+{
   "name": "discord-bot-rdv",
   "version": "1.0.0",
   "description": "Bot Discord pour gérer les RDV",
@@ -17,7 +17,7 @@
   "type": "commonjs",
   "dependencies": {
     "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3",
     "googleapis": "^105.0.0"
   }
 }
-
