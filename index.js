@@ -22,48 +22,34 @@ const auth = new google.auth.GoogleAuth({
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
-// --- Fonction Google Sheets ---
+// --- Fonction Google Sheets (append) ---
 async function saveToSheet(all) {
   try {
     const sheets = google.sheets({ version: "v4", auth: await auth.getClient() });
     const spreadsheetId = "1VFTJUZzoSp4xNXxourEtAmaY9eHKmwK90RiUs6KfsZI";
 
-    const res = await sheets.spreadsheets.values.get({
+    await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: "Feuille1!A2:A3238",
-    });
-    const values = res.data.values || [];
-
-    let lastRow = 1;
-    for (let i = 0; i < values.length; i++) {
-      if (values[i][0] && values[i][0].toString().trim() !== "") {
-        lastRow = i + 2;
-      }
-    }
-    const nextRow = lastRow + 1;
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `Feuille1!A${nextRow}:I${nextRow}`,
-      valueInputOption: "RAW",
+      range: "Feuille1!A:I",
+      valueInputOption: "USER_ENTERED",
       requestBody: {
         values: [[
           new Date().toLocaleString("fr-FR"),
-          all.agent,
-          all.garage,
-          all.client,
-          all.voiture,
-          all.tel,
-          all.date,
-          all.heure,
+          all.agent || "",
+          all.garage || "",
+          all.client || "",
+          all.voiture || "",
+          all.tel || "",
+          all.date || "",
+          all.heure || "",
           all.rebooking || "-"
         ]],
       },
     });
 
-    console.log("✅ RDV écrit à la ligne " + nextRow);
+    console.log("✅ RDV ajouté en nouvelle ligne");
   } catch (err) {
-    console.error("❌ Erreur Google Sheets:", err.message);
+    console.error("❌ Erreur Google Sheets:", err.message || err);
   }
 }
 
@@ -77,11 +63,8 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    // Slash command /rdv
     if (interaction.isChatInputCommand() && interaction.commandName === "rdv") {
-      const modal1 = new ModalBuilder()
-        .setCustomId("rdvForm1")
-        .setTitle("RDV (Étape 1/2)");
+      const modal1 = new ModalBuilder().setCustomId("rdvForm1").setTitle("RDV (Étape 1/2)");
 
       const agent = new TextInputBuilder().setCustomId("agent").setLabel("Agent").setStyle(TextInputStyle.Short).setRequired(true);
       const garage = new TextInputBuilder().setCustomId("garage").setLabel("Garage").setStyle(TextInputStyle.Short).setRequired(true);
@@ -101,7 +84,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // Soumission du premier modal
     if (interaction.isModalSubmit() && interaction.customId === "rdvForm1") {
       const data1 = {
         agent: interaction.fields.getTextInputValue("agent"),
@@ -113,10 +95,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       pendingData.set(interaction.user.id, data1);
 
-      const nextBtn = new ButtonBuilder()
-        .setCustomId("rdvFormNext")
-        .setLabel("Compléter (Étape 2)")
-        .setStyle(ButtonStyle.Primary);
+      const nextBtn = new ButtonBuilder().setCustomId("rdvFormNext").setLabel("Compléter (Étape 2)").setStyle(ButtonStyle.Primary);
 
       await interaction.reply({
         content: "Étape 1 enregistrée. Cliquez pour compléter l’étape 2.",
@@ -126,20 +105,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // Bouton → second modal
     if (interaction.isButton() && interaction.customId === "rdvFormNext") {
       if (!pendingData.has(interaction.user.id)) {
         await interaction.reply({ content: "Aucune donnée d’étape 1 trouvée. Recommence avec /rdv.", ephemeral: true });
         return;
       }
 
-      const modal2 = new ModalBuilder()
-        .setCustomId("rdvForm2")
-        .setTitle("RDV (Étape 2/2)");
+      const modal2 = new ModalBuilder().setCustomId("rdvForm2").setTitle("RDV (Étape 2/2)");
 
-      const heure = new TextInputBuilder().setCustomId("heure").setLabel("Heure").setStyle(TextInputStyle.Short).setRequired(true);
-      const date = new TextInputBuilder().setCustomId("date").setLabel("Date").setStyle(TextInputStyle.Short).setRequired(true);
-      const rebooking = new TextInputBuilder().setCustomId("rebooking").setLabel("Rebooking").setStyle(TextInputStyle.Short).setRequired(false);
+      const heure = new TextInputBuilder().setCustomId("heure").setLabel("Heure (ex: 15:30)").setStyle(TextInputStyle.Short).setRequired(true);
+      const date = new TextInputBuilder().setCustomId("date").setLabel("Date (ex: 2025-12-13)").setStyle(TextInputStyle.Short).setRequired(true);
+      const rebooking = new TextInputBuilder().setCustomId("rebooking").setLabel("Rebooking (optionnel)").setStyle(TextInputStyle.Short).setRequired(false);
 
       modal2.addComponents(
         new ActionRowBuilder().addComponents(heure),
@@ -151,7 +127,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // Soumission du second modal
     if (interaction.isModalSubmit() && interaction.customId === "rdvForm2") {
       const data1 = pendingData.get(interaction.user.id) || {};
       const data2 = {
@@ -172,9 +147,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ephemeral: true,
       });
 
-      saveToSheet(all).catch(err => {
-        console.error("❌ Erreur Google Sheets:", err.message);
-      });
+      await saveToSheet(all);
       return;
     }
   } catch (err) {
@@ -187,12 +160,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 // --- Vérification du token avant connexion ---
 if (!process.env.DISCORD_TOKEN) {
-  console.error("❌ Aucun token reçu depuis Railway !");
+  console.error("❌ Aucun token Discord trouvé dans les variables d'environnement.");
+  process.exit(1);
 } else {
   console.log("🔑 Token reçu: OK (masqué)");
-  
-console.log("DISCORD_TOKEN =", process.env.DISCORD_TOKEN ? "✅ présent" : "❌ absent");
-
-client.login(process.env.DISCORD_TOKEN);
+  console.log("DISCORD_TOKEN =", process.env.DISCORD_TOKEN ? "✅ présent" : "❌ absent");
+  client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error("❌ Erreur lors du login Discord:", err);
+    process.exit(1);
+  });
 }
-
