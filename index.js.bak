@@ -1,0 +1,196 @@
+// index.js
+// Requirements: node >= 18, discord.js v14, googleapis, dotenv
+// npm install discord.js googleapis dotenv
+
+// --- Charger les variables d'environnement ---
+require("dotenv").config();
+
+// --- Imports ---
+const http = require("http");
+const { Client, GatewayIntentBits, Events, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, SlashCommandBuilder, Routes, REST } = require("discord.js");
+const { google } = require("googleapis");
+
+// --- Vérifications d'environnement essentielles ---
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID; // optionnel si tu as besoin de déployer les slash commands
+const GUILD_ID = process.env.GUILD_ID;   // optionnel pour commandes en dev
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "1VFTJUZzoSp4xNXxourEtAmaY9eHKmwK90RiUs6KfsZI"; // adapte si besoin
+const DISABLE_SHEETS = (process.env.DISABLE_SHEETS || "false").toLowerCase() === "true";
+
+if (!DISCORD_TOKEN) {
+  console.error("❌ DISCORD_TOKEN manquant. Ajoute-le dans .env et relance.");
+  process.exit(1);
+}
+
+// --- Authentification Google (sécurisée) ---
+let googleCredentials = null;
+let auth = null;
+if (!DISABLE_SHEETS) {
+  try {
+    if (!process.env.GOOGLE_CREDENTIALS) throw new Error("GOOGLE_CREDENTIALS manquant");
+    googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    auth = new google.auth.GoogleAuth({
+      credentials: googleCredentials,
+      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    });
+  } catch (err) {
+    console.error("❌ GOOGLE_CREDENTIALS invalide ou manquant:", err.message);
+    console.error("→ Si tu veux démarrer sans Sheets, définis DISABLE_SHEETS=true dans .env");
+    process.exit(1);
+  }
+}
+
+// --- Fonction Google Sheets (append) ---
+async function saveToSheet(all) {
+  if (DISABLE_SHEETS) {
+    console.log("saveToSheet skipped (DISABLE_SHEETS=true)");
+    return;
+  }
+
+  try {
+    const sheets = google.sheets({ version: "v4", auth });
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: "Feuille1!A:I",
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      majorDimension: "ROWS",
+      requestBody: {
+        values: [[
+          new Date().toLocaleString("fr-FR"),
+          all.agent || "",
+          all.garage || "",
+          all.client || "",
+          all.voiture || "",
+          all.tel || "",
+          all.date || "",
+          all.heure || "",
+          all.rebooking || "-"
+        ]],
+      },
+    });
+    console.log("✅ RDV ajouté en nouvelle ligne");
+  } catch (err) {
+    console.error("❌ Erreur Google Sheets:", err.message || err);
+  }
+}
+
+// --- Client Discord ---
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+});
+
+client.once(Events.ClientReady, () => {
+  console.log(`✅ Connecté en tant que ${client.user.tag}`);
+});
+
+// Exemple simple : commande /rdv qui ouvre un modal et enregistre la réponse
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === "rdv") {
+        const modal = new ModalBuilder()
+          .setCustomId("rdv_modal")
+          .setTitle("Créer un RDV");
+
+        const agentInput = new TextInputBuilder()
+          .setCustomId("agent")
+          .setLabel("Agent")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false);
+
+        const clientInput = new TextInputBuilder()
+          .setCustomId("client")
+          .setLabel("Client")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const telInput = new TextInputBuilder()
+          .setCustomId("tel")
+          .setLabel("Téléphone")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false);
+
+        const dateInput = new TextInputBuilder()
+          .setCustomId("date")
+          .setLabel("Date (JJ/MM/AAAA)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(agentInput),
+          new ActionRowBuilder().addComponents(clientInput),
+          new ActionRowBuilder().addComponents(telInput),
+          new ActionRowBuilder().addComponents(dateInput)
+        );
+
+        await interaction.showModal(modal);
+      }
+    } else if (interaction.isModalSubmit()) {
+      if (interaction.customId === "rdv_modal") {
+        await interaction.deferReply({ ephemeral: true });
+
+        const all = {
+          agent: interaction.fields.getTextInputValue("agent"),
+          client: interaction.fields.getTextInputValue("client"),
+          tel: interaction.fields.getTextInputValue("tel"),
+          date: interaction.fields.getTextInputValue("date"),
+          heure: "", // si tu veux ajouter heure, ajoute un champ au modal
+          garage: "",
+          voiture: "",
+          rebooking: "-"
+        };
+
+        // Appel à Google Sheets (peut être désactivé via DISABLE_SHEETS)
+        await saveToSheet(all);
+
+        await interaction.editReply({ content: "RDV enregistré (ou simulé si DISABLE_SHEETS=true)." });
+      }
+    }
+  } catch (err) {
+    console.error("Erreur interaction:", err);
+    if (interaction.replied || interaction.deferred) {
+      try { await interaction.editReply({ content: "Une erreur est survenue." }); } catch {}
+    } else {
+      try { await interaction.reply({ content: "Une erreur est survenue.", ephemeral: true }); } catch {}
+    }
+  }
+});
+
+// --- (Optionnel) Déployer une commande slash locale (dev) ---
+async function deployCommands() {
+  if (!CLIENT_ID || !GUILD_ID) return;
+  const commands = [
+    new SlashCommandBuilder().setName("rdv").setDescription("Créer un RDV (ouvre un formulaire)"),
+  ].map(cmd => cmd.toJSON());
+
+  const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
+  try {
+    console.log("Déploiement des commandes...");
+    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+    console.log("✅ Commandes déployées en dev (guild).");
+  } catch (err) {
+    console.error("Erreur deployCommands:", err);
+  }
+}
+
+// --- Petit serveur HTTP pour Render / keepalive ---
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("ok");
+}).listen(port, () => {
+  console.log(`HTTP server listening on ${port}`);
+});
+
+// --- Démarrage ---
+(async () => {
+  try {
+    await deployCommands(); // ignore si CLIENT_ID/GUILD_ID non fournis
+    await client.login(DISCORD_TOKEN);
+  } catch (err) {
+    console.error("Erreur au démarrage:", err);
+    process.exit(1);
+  }
+})();
+
