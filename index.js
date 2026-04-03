@@ -16,9 +16,9 @@ const {
 
 const { google } = require("googleapis");
 
-// --- Authentification Google ---
+// --- Authentification Google via variable d'environnement ---
 const auth = new google.auth.GoogleAuth({
-  keyFile: "credentials.json",
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
@@ -28,7 +28,6 @@ async function saveToSheet(all) {
     const sheets = google.sheets({ version: "v4", auth: await auth.getClient() });
     const spreadsheetId = "1VFTJUZzoSp4xNXxourEtAmaY9eHKmwK90RiUs6KfsZI";
 
-    // 🔍 Lire la colonne A pour trouver la dernière ligne réellement remplie
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: "Feuille1!A2:A3238",
@@ -43,7 +42,6 @@ async function saveToSheet(all) {
     }
     const nextRow = lastRow + 1;
 
-    // ✍️ Écrire exactement à la suite
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `Feuille1!A${nextRow}:J${nextRow}`,
@@ -80,7 +78,6 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    // Slash command /rdv
     if (interaction.isChatInputCommand() && interaction.commandName === "rdv") {
       const modal1 = new ModalBuilder()
         .setCustomId("rdvForm1")
@@ -104,7 +101,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // Soumission du premier modal
     if (interaction.isModalSubmit() && interaction.customId === "rdvForm1") {
       const data1 = {
         agent: interaction.fields.getTextInputValue("agent"),
@@ -113,7 +109,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         voiture: interaction.fields.getTextInputValue("voiture"),
         tel: interaction.fields.getTextInputValue("tel"),
       };
-
       pendingData.set(interaction.user.id, data1);
 
       const nextBtn = new ButtonBuilder()
@@ -129,7 +124,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // Bouton → second modal
     if (interaction.isButton() && interaction.customId === "rdvFormNext") {
       if (!pendingData.has(interaction.user.id)) {
         await interaction.reply({ content: "Aucune donnée d'étape 1 trouvée. Recommence avec /rdv.", ephemeral: true });
@@ -156,7 +150,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    // Soumission du second modal
     if (interaction.isModalSubmit() && interaction.customId === "rdvForm2") {
       const data1 = pendingData.get(interaction.user.id) || {};
       const data2 = {
@@ -169,7 +162,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const all = { ...data1, ...data2 };
       pendingData.delete(interaction.user.id);
 
-      // ✅ Répondre immédiatement à Discord
       await interaction.reply({
         content:
           `📋 RDV enregistré:\n` +
@@ -179,7 +171,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ephemeral: true,
       });
 
-      // ⚡ Écriture vers Google Sheets en arrière-plan
       saveToSheet(all).catch(err => {
         console.error("❌ Erreur Google Sheets:", err.message);
       });
@@ -193,5 +184,4 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// ✅ Connexion avec le token depuis .env
 client.login(process.env.DISCORD_TOKEN);
