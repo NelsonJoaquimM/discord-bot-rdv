@@ -30,7 +30,7 @@ async function saveToSheet(all) {
 
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: "Feuille1!A2:A3238",
+      range: "Feuille1!A2:A131076",
     });
     const values = res.data.values || [];
 
