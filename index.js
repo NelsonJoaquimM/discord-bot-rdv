@@ -84,23 +84,38 @@ async function saveToSheet(all) {
   }
 }
 
-// --- Recherche d'une ligne par ID RDV (colonne J) ---
+// --- Recherche optimisée : colonne J uniquement puis ligne complète ---
 async function findRowByIdRdv(idRdv) {
   try {
     const sheets = google.sheets({ version: "v4", auth: await auth.getClient() });
-    const res = await sheets.spreadsheets.values.get({
+
+    // Étape 1 : cherche uniquement dans la colonne J (rapide)
+    const resJ = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Feuille1!A2:K",
+      range: "Feuille1!J2:J",
     });
-    const rows = res.data.values || [];
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const idCell = (row[COL.ID_RDV] || "").toString().trim();
+    const colJ = resJ.data.values || [];
+
+    let foundIndex = -1;
+    for (let i = 0; i < colJ.length; i++) {
+      const idCell = (colJ[i][0] || "").toString().trim();
       if (idCell === idRdv.trim()) {
-        return { rowIndex: i + 2, row }; // rowIndex = numéro réel dans le Sheet (base 1, avec header)
+        foundIndex = i;
+        break;
       }
     }
-    return null;
+
+    if (foundIndex === -1) return null;
+
+    // Étape 2 : récupère uniquement la ligne trouvée (A:K)
+    const realRow = foundIndex + 2; // +2 car on commence à la ligne 2
+    const resRow = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Feuille1!A${realRow}:K${realRow}`,
+    });
+    const row = resRow.data.values?.[0] || [];
+    return { rowIndex: realRow, row };
+
   } catch (err) {
     console.error("❌ Erreur findRowByIdRdv:", err.message);
     return null;
@@ -131,8 +146,8 @@ async function updateDateHeure(rowIndex, date, heure) {
 
 // --- Discord Bot ---
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const pendingData = new Map();       // Données étape 1 RDV
-const pendingModif = new Map();      // Données modification en attente (ID + rowIndex + infos)
+const pendingData = new Map();
+const pendingModif = new Map();
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
@@ -158,7 +173,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     // ══════════════════════════════════════════
-    //  /modifier-rdv — Modification d'un RDV
+    //  /modifier-rdv — Saisie ID
     // ══════════════════════════════════════════
     if (interaction.isChatInputCommand() && interaction.commandName === "modifier-rdv") {
       const modal = new ModalBuilder().setCustomId("modifIdForm").setTitle("Modifier un RDV");
@@ -177,22 +192,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     // ══════════════════════════════════════════
-    //  Modal — ID RDV soumis → recherche + boutons
+    //  Modal — ID soumis → recherche + boutons
     // ══════════════════════════════════════════
     if (interaction.isModalSubmit() && interaction.customId === "modifIdForm") {
       const idRdv = interaction.fields.getTextInputValue("idRdv").trim();
 
+      // deferReply AVANT la recherche pour éviter le timeout Discord
       await interaction.deferReply({ ephemeral: true });
 
+      console.log(`🔍 Recherche ID RDV : ${idRdv}`);
       const result = await findRowByIdRdv(idRdv);
+
       if (!result) {
-        await interaction.editReply({ content: `❌ Aucun RDV trouvé avec l'ID **${idRdv}**. Vérifie la colonne J du Sheet.` });
+        await interaction.editReply({ content: `❌ Aucun RDV trouvé avec l'ID **${idRdv}**.\nVérifie la colonne J du Sheet.` });
         return;
       }
 
       const { rowIndex, row } = result;
+      console.log(`✅ RDV trouvé ligne ${rowIndex}`);
 
-      // Sauvegarder pour usage après clic bouton
       pendingModif.set(interaction.user.id, { idRdv, rowIndex, row });
 
       const info =
@@ -205,7 +223,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         `📊 Statut actuel : **${row[COL.STATUT] || "—"}**\n\n` +
         `**Que veux-tu faire ?**`;
 
-      const row1 = new ActionRowBuilder().addComponents(
+      const boutons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId("modif_VENU").setLabel("✋ VENU").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId("modif_ANNULE").setLabel("❌ ANNULÉ").setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId("modif_VENDU").setLabel("💰 VENDU").setStyle(ButtonStyle.Success),
@@ -213,7 +231,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         new ButtonBuilder().setCustomId("modif_REPORTER").setLabel("📅 REPORTER").setStyle(ButtonStyle.Primary),
       );
 
-      await interaction.editReply({ content: info, components: [row1] });
+      await interaction.editReply({ content: info, components: [boutons] });
       return;
     }
 
@@ -229,7 +247,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      // Cas REPORTER → ouvrir modal date + heure
+      // REPORTER → modal date + heure
       if (action === "REPORTER") {
         const modal = new ModalBuilder().setCustomId("reporterForm").setTitle("📅 Reporter le RDV");
         modal.addComponents(
@@ -254,28 +272,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      // Cas statut direct : VENU, ANNULÉ, VENDU, SAV
-      const labelMap = {
-        VENU: "VENU",
-        ANNULE: "ANNULÉ",
-        VENDU: "VENDU",
-        SAV: "SAV",
-      };
+      // Statut direct
+      const labelMap = { VENU: "VENU", ANNULE: "ANNULÉ", VENDU: "VENDU", SAV: "SAV" };
       const statut = labelMap[action];
 
       await interaction.deferReply({ ephemeral: true });
       await updateStatut(modif.rowIndex, statut);
       pendingModif.delete(interaction.user.id);
+      console.log(`✅ Statut mis à jour : ${statut} (ligne ${modif.rowIndex})`);
 
       await interaction.editReply({
-        content: `✅ RDV **${modif.idRdv}** mis à jour !\n📊 Statut → **${statut}** (colonne K, ligne ${modif.rowIndex})`,
+        content: `✅ RDV **${modif.idRdv}** mis à jour !\n📊 Statut → **${statut}**`,
         components: [],
       });
       return;
     }
 
     // ══════════════════════════════════════════
-    //  Modal — Reporter (nouvelle date + heure)
+    //  Modal — Reporter
     // ══════════════════════════════════════════
     if (interaction.isModalSubmit() && interaction.customId === "reporterForm") {
       const newDate = interaction.fields.getTextInputValue("newDate").trim();
@@ -290,17 +304,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
       await updateDateHeure(modif.rowIndex, newDate, newHeure);
       pendingModif.delete(interaction.user.id);
+      console.log(`✅ Date mise à jour : ${newDate} ${newHeure} (ligne ${modif.rowIndex})`);
 
       await interaction.editReply({
-        content:
-          `✅ RDV **${modif.idRdv}** reporté !\n` +
-          `📅 Nouvelle date → **${newDate}** à **${newHeure}** (colonnes G+H, ligne ${modif.rowIndex})`,
+        content: `✅ RDV **${modif.idRdv}** reporté !\n📅 Nouvelle date → **${newDate}** à **${newHeure}**`,
       });
       return;
     }
 
     // ══════════════════════════════════════════
-    //  /rdv — Modal étape 1 soumis
+    //  /rdv — Modal étape 1
     // ══════════════════════════════════════════
     if (interaction.isModalSubmit() && interaction.customId === "rdvForm1") {
       const data1 = {
@@ -342,7 +355,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     // ══════════════════════════════════════════
-    //  /rdv — Modal étape 2 soumis → enregistrement
+    //  /rdv — Modal étape 2 → enregistrement
     // ══════════════════════════════════════════
     if (interaction.isModalSubmit() && interaction.customId === "rdvForm2") {
       const data1 = pendingData.get(interaction.user.id) || {};
